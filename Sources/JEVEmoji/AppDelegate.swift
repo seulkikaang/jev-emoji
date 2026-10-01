@@ -1,6 +1,7 @@
 import AppKit
 import Carbon
 import SwiftUI
+import os
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -11,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var eventHandler: EventHandlerRef?
     private var activationObserver: NSObjectProtocol?
     private var lastExternalApplication: NSRunningApplication?
+    private let logger = Logger(subsystem: "com.jev.emoji", category: "shortcut")
 
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -47,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.behavior = .transient
         panel.animates = false
         panel.contentSize = NSSize(width: 376, height: 490)
+        picker.onInsert = { [weak panel] in panel?.performClose(nil) }
         panel.contentViewController = NSHostingController(rootView: EmojiPickerView(model: picker))
 
         statusItem = item
@@ -78,15 +81,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let callback: EventHandlerProcPtr = { _, _, userData in
             guard let userData else { return noErr }
             let delegate = Unmanaged<AppDelegate>.fromOpaque(userData).takeUnretainedValue()
-            DispatchQueue.main.async { delegate.togglePicker() }
+            DispatchQueue.main.async {
+                let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
+                delegate.logger.notice("Global shortcut received: frontmostPID=\(frontmostPID, privacy: .public)")
+                delegate.togglePicker()
+            }
             return noErr
         }
-        InstallEventHandler(GetApplicationEventTarget(), callback, 1, &spec,
-                            Unmanaged.passUnretained(self).toOpaque(), &eventHandler)
+        let handlerStatus = InstallEventHandler(GetApplicationEventTarget(), callback, 1, &spec,
+                                                Unmanaged.passUnretained(self).toOpaque(), &eventHandler)
+        logger.notice("Global shortcut handler installation: status=\(handlerStatus, privacy: .public)")
+        guard handlerStatus == noErr else { return }
 
         let identifier = EventHotKeyID(signature: OSType(0x4A455645), id: 1)
         // Option + Command + E. This avoids macOS's Control + Command + Space emoji picker.
-        RegisterEventHotKey(UInt32(kVK_ANSI_E), UInt32(optionKey | cmdKey), identifier,
-                            GetApplicationEventTarget(), 0, &hotKey)
+        let hotKeyStatus = RegisterEventHotKey(UInt32(kVK_ANSI_E), UInt32(optionKey | cmdKey), identifier,
+                                              GetApplicationEventTarget(), 0, &hotKey)
+        logger.notice("Global shortcut registration: status=\(hotKeyStatus, privacy: .public)")
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import LocalAuthentication
 import Security
 
 enum JevProvider: String, CaseIterable, Identifiable {
@@ -44,7 +45,24 @@ struct JevGatewayClient {
 
     init(provider: JevProvider = .selected) { self.provider = provider }
 
-    static var hasAPIKey: Bool { loadAPIKey(for: .selected) != nil }
+    static var hasAPIKey: Bool { containsAPIKey(for: .selected) }
+
+    static func containsAPIKey(for provider: JevProvider = .selected) -> Bool {
+        // Reading secret data can display a standard Keychain permission prompt.
+        // Startup and settings only need metadata and must not wait for that prompt.
+        let authenticationContext = LAContext()
+        authenticationContext.interactionNotAllowed = true
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: provider.keychainAccount,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecUseAuthenticationContext as String: authenticationContext
+        ]
+        var attributes: CFTypeRef?
+        return SecItemCopyMatching(query as CFDictionary, &attributes) == errSecSuccess
+    }
 
     static func saveAPIKey(_ value: String, for provider: JevProvider = .selected) throws {
         let key = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -89,7 +107,12 @@ struct JevGatewayClient {
     }
 
     func recommendations(for text: String) async throws -> [EmojiItem] {
-        guard let apiKey = Self.loadAPIKey(for: provider) else { throw JevGatewayError.missingAPIKey(provider) }
+        let requestProvider = provider
+        let key = await Task.detached(priority: .userInitiated) {
+            Self.loadAPIKey(for: requestProvider)
+        }.value
+        try Task.checkCancellation()
+        guard let apiKey = key else { throw JevGatewayError.missingAPIKey(provider) }
 
         let options = Dictionary(uniqueKeysWithValues: EmojiCatalog.items.enumerated().map { index, item in
             let key = "emoji_\(index)"

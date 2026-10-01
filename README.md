@@ -13,6 +13,8 @@ open "build/JEV Emoji.app"
 
 The app appears in the menu bar. Open it with **Option + Command + E**. Type a feeling, situation, or sentence to ask Jev for ten fitting emoji. Press **Return** to insert the first result, or click any emoji.
 
+For local development, you can set `CODE_SIGN_IDENTITY` to an existing Apple signing identity when running `./scripts/build-app.sh`. The script signs the app and verifies the signature. Using the same identity across rebuilds helps macOS recognize the app for permissions and Keychain access; permissions still need to be granted normally. Without this variable, the build has no Apple development or Developer ID signature. An Apple Development signature does not complete signing and notarization for public distribution.
+
 ## Context suggestions and insertion
 
 Allow **JEV Emoji** under **System Settings → Privacy & Security → Accessibility**. The app reads selected text or up to 140 characters in the current paragraph before the cursor. At the start of a paragraph it reads the following text instead. That text is sent to the provider selected in settings for Jev evaluation. Picking an emoji pastes it into the previous app and restores the clipboard contents shortly afterward.

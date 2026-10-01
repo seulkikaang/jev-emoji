@@ -50,10 +50,9 @@ struct EmojiPickerView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             searchFocused = true
-            model.onInsert = { NSApp.keyWindow?.close() }
         }
         .sheet(isPresented: $showingSettings) { JevSettingsView(model: model) }
-        .onExitCommand { NSApp.keyWindow?.close() }
+        .onExitCommand { model.onInsert?() }
         .background {
             Button(action: {
                 if let first = model.recommendations.first { model.insert(first.emoji) }

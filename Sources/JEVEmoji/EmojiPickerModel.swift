@@ -30,6 +30,7 @@ final class EmojiPickerModel: ObservableObject {
     private var requestTask: Task<Void, Never>?
     private var requestNumber = 0
     private var targetProcessID: pid_t = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
+    private var isInserting = false
     private let logger = Logger(subsystem: "com.jev.emoji", category: "context")
 
     var isSearching: Bool { !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -47,6 +48,7 @@ final class EmojiPickerModel: ObservableObject {
         query = ""
         recommendations = EmojiCatalog.popular
         hasJevResults = false
+        isConfigured = JevGatewayClient.containsAPIKey(for: provider)
         canReadContext = AXIsProcessTrusted()
         guard canReadContext else {
             contextMessage = "손쉬운 사용 권한을 켜면 다른 앱의 문장을 읽어요."
@@ -83,7 +85,7 @@ final class EmojiPickerModel: ObservableObject {
         cancelRecommendation()
         provider = value
         UserDefaults.standard.set(value.rawValue, forKey: "JevProvider")
-        isConfigured = JevGatewayClient.loadAPIKey(for: value) != nil
+        isConfigured = JevGatewayClient.containsAPIKey(for: value)
         hasJevResults = false
         recommendations = EmojiCatalog.popular
         errorMessage = nil
@@ -170,8 +172,19 @@ final class EmojiPickerModel: ObservableObject {
     }
 
     func insert(_ emoji: String) {
-        onInsert?()
-        let targetApp = NSWorkspace.shared.runningApplications.first { $0.processIdentifier == targetProcessID }
+        guard !isInserting else { return }
+        guard AXIsProcessTrusted() else {
+            errorMessage = "이모지를 입력하려면 손쉬운 사용 권한을 켜 주세요."
+            return
+        }
+        let insertionPID = targetProcessID
+        guard insertionPID > 0, insertionPID != ProcessInfo.processInfo.processIdentifier,
+              let targetApp = NSWorkspace.shared.runningApplications.first(where: { $0.processIdentifier == insertionPID }),
+              !targetApp.isTerminated else {
+            errorMessage = "입력할 앱을 찾지 못했어요. 원래 앱에서 다시 열어 주세요."
+            return
+        }
+        isInserting = true
         let pasteboard = NSPasteboard.general
         let previousItems = pasteboard.pasteboardItems?.map { item -> [NSPasteboard.PasteboardType: Data] in
             Dictionary(uniqueKeysWithValues: item.types.compactMap { type in
@@ -181,33 +194,84 @@ final class EmojiPickerModel: ObservableObject {
 
         pasteboard.clearContents()
         pasteboard.setString(emoji, forType: .string)
+        let insertionChangeCount = pasteboard.changeCount
+
+        let restoreClipboard: () -> Void = {
+            guard pasteboard.changeCount == insertionChangeCount,
+                  pasteboard.string(forType: .string) == emoji else { return }
+            pasteboard.clearContents()
+            if previousItems.isEmpty {
+                pasteboard.setString("", forType: .string)
+            } else {
+                let restored = previousItems.map { values -> NSPasteboardItem in
+                    let item = NSPasteboardItem()
+                    values.forEach { item.setData($0.value, forType: $0.key) }
+                    return item
+                }
+                pasteboard.writeObjects(restored)
+            }
+        }
+        onInsert?()
+
+        func abortInsertion(_ message: String) {
+            restoreClipboard()
+            self.isInserting = false
+            self.errorMessage = message
+            let alert = NSAlert()
+            alert.messageText = "이모지를 입력하지 못했어요"
+            alert.informativeText = message
+            alert.addButton(withTitle: "확인")
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
+
+        func pasteWhenFocused(attemptsRemaining: Int) {
+            guard !targetApp.isTerminated else {
+                abortInsertion("입력하던 앱이 닫혔어요. 앱을 다시 열어 주세요.")
+                return
+            }
+            guard pasteboard.changeCount == insertionChangeCount,
+                  pasteboard.string(forType: .string) == emoji else {
+                abortInsertion("클립보드가 변경되어 입력을 멈췄어요. 다시 선택해 주세요.")
+                return
+            }
+            guard NSWorkspace.shared.frontmostApplication?.processIdentifier == insertionPID else {
+                guard attemptsRemaining > 0 else {
+                    abortInsertion("원래 앱으로 돌아가지 못했어요. 입력란을 클릭하고 다시 열어 주세요.")
+                    return
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    pasteWhenFocused(attemptsRemaining: attemptsRemaining - 1)
+                }
+                return
+            }
+            guard AXIsProcessTrusted() else {
+                abortInsertion("손쉬운 사용 권한을 확인하고 다시 열어 주세요.")
+                return
+            }
+            let source = CGEventSource(stateID: .hidSystemState)
+            guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true),
+                  let up = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false) else {
+                abortInsertion("키 입력을 만들지 못했어요. 다시 선택해 주세요.")
+                return
+            }
+            down.flags = .maskCommand
+            up.flags = .maskCommand
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                restoreClipboard()
+                self.isInserting = false
+            }
+        }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            targetApp?.activate(options: [.activateIgnoringOtherApps])
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                let source = CGEventSource(stateID: .hidSystemState)
-                let down = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true)
-                down?.flags = .maskCommand
-                down?.post(tap: .cghidEventTap)
-                let up = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
-                up?.flags = .maskCommand
-                up?.post(tap: .cghidEventTap)
-
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    guard pasteboard.string(forType: .string) == emoji else { return }
-                    pasteboard.clearContents()
-                    if previousItems.isEmpty {
-                        pasteboard.setString("", forType: .string)
-                    } else {
-                        let restored = previousItems.map { values -> NSPasteboardItem in
-                            let item = NSPasteboardItem()
-                            values.forEach { item.setData($0.value, forType: $0.key) }
-                            return item
-                        }
-                        pasteboard.writeObjects(restored)
-                    }
-                }
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier != insertionPID,
+               !targetApp.activate(options: [.activateIgnoringOtherApps]) {
+                abortInsertion("원래 앱을 활성화하지 못했어요. 입력란에서 다시 열어 주세요.")
+                return
             }
+            pasteWhenFocused(attemptsRemaining: 10)
         }
     }
 }

@@ -32,4 +32,9 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+if [[ -n "${CODE_SIGN_IDENTITY:-}" ]]; then
+    codesign --force --sign "$CODE_SIGN_IDENTITY" \
+        --identifier com.jev.emoji --timestamp=none "$APP_DIR"
+    codesign --verify --strict --verbose=2 "$APP_DIR"
+fi
 printf 'Built %s\n' "$APP_DIR"
