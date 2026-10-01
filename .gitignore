@@ -1,0 +1,10 @@
+.build/
+.DS_Store
+build/
+videos/
+dev/
+.env
+.env.*
+*.log
+*.pem
+*.key
