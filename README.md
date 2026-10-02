@@ -41,3 +41,99 @@ As of **2026-10-01**, TypeSafe advertises $42 per billion input tokens ($0.042 p
 This is a native macOS app. GitHub publishes its source or a packaged release; it does not host the app as a website. The local build is not signed with a Developer ID or notarized for public distribution. Public releases need an appropriate signing/notarization process; do not publish personal API keys in source or binaries. Each installation should register its own provider key.
 
 Accessibility references: [Electron](https://www.electronjs.org/docs/latest/tutorial/accessibility), [Chromium text markers](https://github.com/chromium/chromium/blob/main/ui/accessibility/platform/browser_accessibility_cocoa.mm).
+
+## Get the source and build on your Mac
+
+This build script targets Apple Silicon (arm64). You need macOS 13 or later, Git and Xcode Command Line Tools. Intel builds are not provided by this script.
+
+```sh
+git clone https://github.com/seulkikaang/jev-emoji.git
+cd jev-emoji
+./scripts/build-app.sh
+```
+
+Then open `build/JEV Emoji.app`. Open the picker's settings, choose TypeSafe or Vercel AI Gateway and register your own provider API key. Grant Accessibility permission in System Settings to let the app read your active editor's current text. Keys are saved locally in Keychain and are not included in a published ZIP.
+
+## Download a developer preview
+
+1. Open this repository's **Releases** page.
+2. Choose a release explicitly labeled **developer preview**, then download its Apple Silicon ZIP under **Assets**.
+3. Extract the ZIP to find `JEV Emoji.app`.
+
+The preview has not completed Developer ID signing and Apple notarization. A local ad-hoc signature or successful build does not complete these distribution steps. macOS may block an internet-downloaded preview. Do not disable system-wide security controls. Developers can inspect the source and build locally instead. Download availability is not a guarantee of installation or Accessibility permissions on another Mac.
+
+## Publish your own source repository
+
+Install GitHub CLI from its official instructions (`https://cli.github.com/`) and authenticate your own account:
+
+```sh
+gh auth login
+gh auth status
+```
+
+For a new local project without Git history or an existing remote, initialize Git and create your own public repository:
+
+```sh
+git init -b main
+gh repo create YOUR_ACCOUNT/YOUR_REPOSITORY --public --source=. --remote=origin
+```
+
+These are examples, not commands executed on this existing project. Replace the account and repository placeholders before use, review public visibility and inspect your local files first. Do not run them inside an already configured repository. This project already has a repository, so the lecture uses `gh repo view seulkikaang/jev-emoji` and updates the existing repository instead of creating another one.
+
+Check your current branch and remote before uploading:
+
+```sh
+git branch --show-current
+git remote -v
+```
+
+Before uploading, inspect the file list and exclude API keys, credentials, personal captures, local builds, model files and videos through `.gitignore`. Review your changes:
+
+```sh
+git status --short
+git diff -- README.md
+git diff --check
+```
+
+For a reviewed README-only change, select that file and check the selection:
+
+```sh
+git add README.md
+git diff --cached -- README.md
+git status --short
+```
+
+Save the selected change and send it to your own repository's branch:
+
+```sh
+git commit -m "docs: explain source and preview publication"
+git push origin main
+```
+
+These commands assume your remote is named `origin`, your branch is `main`, and you have permission to push. Open GitHub afterward and confirm the commit and README actually appear. GitHub stores the source; it does not turn this native Mac app into a website.
+
+## Publish an app file as a GitHub Release
+
+The default build script does not sign unless `CODE_SIGN_IDENTITY` is supplied. For a separate local developer preview you can explicitly apply an ad-hoc signature before verification:
+
+```sh
+codesign --force --sign - --identifier com.jev.emoji "build/JEV Emoji.app"
+```
+
+An ad-hoc signature does not identify an Apple-approved developer or notarize the app. Signing/replacing an app can require macOS permissions to be granted again. The lecture packages the already verified current app without rebuilding or signing it again. After your build has a valid signature, package it as a ZIP:
+
+```sh
+codesign --verify --strict --verbose=2 "build/JEV Emoji.app"
+ditto -c -k --sequesterRsrc --keepParent "build/JEV Emoji.app" "build/JEV-Emoji-arm64-developer-preview.zip"
+shasum -a 256 "build/JEV-Emoji-arm64-developer-preview.zip"
+```
+
+With authenticated GitHub CLI, save the release notes in a text file and publish a new preview using:
+
+```sh
+gh release create YOUR_NEW_TAG build/JEV-Emoji-arm64-developer-preview.zip --repo YOUR_ACCOUNT/YOUR_REPOSITORY --target YOUR_REVIEWED_COMMIT --title "Developer preview" --notes-file YOUR_NOTES_FILE --prerelease
+```
+
+Replace the placeholders with your own new tag, repository, reviewed commit and notes path. The lecture uses the existing `seulkikaang/jev-emoji` repository and a new `v0.1.1` preview; it does not create a duplicate repository. State the supported Mac architecture and macOS version, the provider-key requirement and the current signing/notarization status. Verify the published page and download the asset once; compare its SHA-256 with the ZIP you uploaded.
+
+Publishing a source commit and publishing a Release are separate operations. Ordinary user distribution also needs the appropriate Apple signing/notarization process, which this preview has not completed.
